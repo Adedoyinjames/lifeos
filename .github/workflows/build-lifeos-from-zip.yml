@@ -1,0 +1,60 @@
+name: Build LifeOS APK From Zip
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-apk:
+    name: Build installable debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.4"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Unpack LifeOS source
+        run: |
+          mkdir lifeos-src
+          unzip -q lifeos-source.zip -d lifeos-src
+
+      - name: Install dependencies
+        working-directory: lifeos-src
+        run: npm install
+
+      - name: Typecheck
+        working-directory: lifeos-src
+        run: npm run typecheck
+
+      - name: Generate Android project
+        working-directory: lifeos-src
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Build debug APK
+        working-directory: lifeos-src/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LifeOS-debug-apk
+          path: lifeos-src/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
