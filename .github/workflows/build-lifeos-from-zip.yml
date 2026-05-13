@@ -36,20 +36,18 @@ jobs:
           mkdir lifeos-src
           unzip -q lifeos-source.zip -d lifeos-src/
 
-          # Auto-detect the project root — the folder that owns package.json
           APP_DIR=$(find lifeos-src -maxdepth 3 -name "package.json" \
             ! -path "*/node_modules/*" \
             | head -1 \
             | xargs dirname)
 
           if [ -z "$APP_DIR" ]; then
-            echo "::error::Could not locate package.json inside the zip. Check the archive structure."
+            echo "::error::Could not locate package.json inside the zip."
             exit 1
           fi
 
           echo "Detected project root: $APP_DIR"
           mv "$APP_DIR" lifeos-src/lifeos-app
-          echo "PROJECT_DIR=$GITHUB_WORKSPACE/lifeos-src/lifeos-app" >> $GITHUB_ENV
 
       - name: Install npm dependencies
         working-directory: lifeos-src/lifeos-app
@@ -72,7 +70,7 @@ jobs:
             -o android/app/src/main/assets/models/assistant.gguf \
             "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct-GGUF/resolve/main/smollm2-135m-instruct-q4_k_m.gguf" \
             && echo "Model bundled: $(du -sh android/app/src/main/assets/models/assistant.gguf)" \
-            || { echo "::warning::Model download failed — onboarding screen handles it at runtime"; \
+            || { echo "::warning::Model download failed â€” onboarding screen handles it at runtime"; \
                  rm -f android/app/src/main/assets/models/assistant.gguf; }
 
       - name: Disable aapt2 compression for .gguf
@@ -111,47 +109,105 @@ jobs:
           import re
           from pathlib import Path
 
-          p = Path("android/app/build.gradle")
+          KEYSTORE = 'lifeos-release.keystore'
+          PASS     = 'lifeos-release-pass'
+          ALIAS    = 'lifeos'
+
+          # â”€â”€ Utility: find the closing } that matches the { at open_pos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          def closing_brace(text, open_pos):
+              depth = 0
+              for i in range(open_pos, len(text)):
+                  if text[i] == '{':
+                      depth += 1
+                  elif text[i] == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return i
+              return -1
+
+          p = Path('android/app/build.gradle')
           t = p.read_text()
 
-          # 1. Inject signingConfigs block before buildTypes (only once)
-          if "lifeos-release.keystore" not in t:
-              signing_block = (
-                  "    signingConfigs {\n"
-                  "        release {\n"
-                  "            storeFile file('lifeos-release.keystore')\n"
-                  "            storePassword 'lifeos-release-pass'\n"
-                  "            keyAlias 'lifeos'\n"
-                  "            keyPassword 'lifeos-release-pass'\n"
-                  "        }\n"
-                  "    }\n"
+          # â”€â”€ 1. Add release entry to signingConfigs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Expo prebuild always generates a signingConfigs { debug { ... } } block.
+          # We must ADD our release entry inside it â€” not create a second block.
+          if KEYSTORE not in t:
+              release_entry = (
+                  '\n        release {\n'
+                  f"            storeFile file('{KEYSTORE}')\n"
+                  f"            storePassword '{PASS}'\n"
+                  f"            keyAlias '{ALIAS}'\n"
+                  f"            keyPassword '{PASS}'\n"
+                  '        }'
               )
-              # Insert the whole signingConfigs block right before buildTypes
-              t = re.sub(r'(\s*buildTypes\s*\{)', signing_block + r'\1', t, count=1)
-              print("signingConfigs block inserted")
-          else:
-              print("signingConfigs block already present")
 
-          # 2. Wire signingConfig into buildTypes > release (only once)
-          #    Uses DOTALL so it can span multiple lines, and is anchored to
-          #    buildTypes so it never accidentally matches the signingConfigs block.
-          if "signingConfig signingConfigs.release" not in t:
-              t = re.sub(
-                  r'(buildTypes\s*\{[^}]*?release\s*\{)',
-                  r'\1\n            signingConfig signingConfigs.release',
-                  t,
-                  count=1,
-                  flags=re.DOTALL,
-              )
-              print("signingConfig applied to buildTypes.release")
+              sc_m = re.search(r'\bsigningConfigs\s*\{', t)
+              if sc_m:
+                  # Block already exists â€” insert release before its closing brace
+                  close = closing_brace(t, sc_m.end() - 1)
+                  if close != -1:
+                      t = t[:close] + release_entry + '\n    ' + t[close:]
+                      print('Inserted release entry into existing signingConfigs block')
+              else:
+                  # No signingConfigs at all â€” create one inside android { }
+                  android_m = re.search(r'\bandroid\s*\{', t)
+                  if android_m:
+                      android_close = closing_brace(t, android_m.end() - 1)
+                      new_block = (
+                          '\n    signingConfigs {\n'
+                          + release_entry + '\n'
+                          + '    }\n'
+                      )
+                      t = t[:android_close] + new_block + t[android_close:]
+                      print('Created signingConfigs block inside android {}')
           else:
-              print("signingConfig already wired")
+              print('Keystore already configured â€” skipping signingConfigs step')
 
-          # 3. Replace any leftover debug signing reference
-          t = t.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+          # â”€â”€ 2. Point buildTypes.release at signingConfigs.release â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Use brace-counting to find exactly the release { } block inside
+          # buildTypes { } â€” immune to nested debug { } blocks confusing the parser.
+          bt_m = re.search(r'\bbuildTypes\s*\{', t)
+          if bt_m:
+              bt_open  = bt_m.end() - 1
+              bt_close = closing_brace(t, bt_open)
+              bt_inner = t[bt_open + 1 : bt_close]
+
+              rel_m = re.search(r'\brelease\s*\{', bt_inner)
+              if rel_m:
+                  # Compute absolute positions of release { } in full file
+                  rel_open  = bt_open + 1 + (rel_m.end() - 1)
+                  rel_close = closing_brace(t, rel_open)
+                  rel_inner = t[rel_open + 1 : rel_close]
+
+                  if 'signingConfig signingConfigs.release' in rel_inner:
+                      print('signingConfig already points to release â€” nothing to do')
+                  elif 'signingConfig signingConfigs.debug' in rel_inner:
+                      new_inner = rel_inner.replace(
+                          'signingConfig signingConfigs.debug',
+                          'signingConfig signingConfigs.release',
+                          1,
+                      )
+                      t = t[:rel_open + 1] + new_inner + t[rel_close:]
+                      print('Replaced debug signingConfig with release in buildTypes.release')
+                  else:
+                      # No signingConfig line at all â€” inject one
+                      t = t[:rel_open + 1] + '\n            signingConfig signingConfigs.release' + t[rel_open + 1:]
+                      print('Injected signingConfig into buildTypes.release')
+              else:
+                  print('WARNING: could not find release block inside buildTypes')
+          else:
+              print('WARNING: could not find buildTypes block')
 
           p.write_text(t)
-          print("Done — build.gradle updated")
+
+          # â”€â”€ 3. Print the android { } section for CI debugging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          t2 = p.read_text()
+          android_m = re.search(r'\bandroid\s*\{', t2)
+          if android_m:
+              close = closing_brace(t2, android_m.end() - 1)
+              print('\nâ”€â”€ Final android { } block â”€â”€')
+              print(t2[android_m.start() : close + 1])
+          print('Done â€” build.gradle updated')
           PY
 
       - name: Build release APK
