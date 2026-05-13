@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-apk:
-    name: Build installable debug APK
+    name: Build signed release APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -48,10 +48,50 @@ jobs:
         working-directory: lifeos-src
         run: npx expo prebuild --platform android --clean --no-install
 
+      - name: Create release signing key
+        working-directory: lifeos-src
+        run: |
+          keytool -genkeypair -v \
+            -storetype PKCS12 \
+            -keystore android/app/lifeos-release.keystore \
+            -alias lifeos \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass lifeos-release-pass \
+            -keypass lifeos-release-pass \
+            -dname "CN=LifeOS, OU=Personal, O=LifeOS, L=Lagos, ST=Lagos, C=NG"
+
+      - name: Configure release signing
+        working-directory: lifeos-src
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+          if "lifeos-release.keystore" not in text:
+              text = text.replace(
+                  "signingConfigs {",
+                  """signingConfigs {
+                  release {
+                      storeFile file('lifeos-release.keystore')
+                      storePassword 'lifeos-release-pass'
+                      keyAlias 'lifeos'
+                      keyPassword 'lifeos-release-pass'
+                  }
+          """,
+                  1,
+              )
+          if "signingConfig signingConfigs.release" not in text:
+              text = text.replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
+          text = text.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+          path.write_text(text)
+          PY
+
       - name: Build release APK
         working-directory: lifeos-src/android
         run: ./gradlew assembleRelease --no-daemon
-  
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
