@@ -36,8 +36,7 @@ jobs:
           mkdir lifeos-src
           unzip -q lifeos-source.zip -d lifeos-src/
 
-          # Auto-detect the project root — the deepest folder that owns package.json
-          # This works regardless of what the zip's top-level folder is named.
+          # Auto-detect the project root — the folder that owns package.json
           APP_DIR=$(find lifeos-src -maxdepth 3 -name "package.json" \
             ! -path "*/node_modules/*" \
             | head -1 \
@@ -49,8 +48,6 @@ jobs:
           fi
 
           echo "Detected project root: $APP_DIR"
-
-          # Normalize to a stable path so every subsequent step can use it
           mv "$APP_DIR" lifeos-src/lifeos-app
           echo "PROJECT_DIR=$GITHUB_WORKSPACE/lifeos-src/lifeos-app" >> $GITHUB_ENV
 
@@ -111,25 +108,50 @@ jobs:
         working-directory: lifeos-src/lifeos-app
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
+
           p = Path("android/app/build.gradle")
           t = p.read_text()
+
+          # 1. Inject signingConfigs block before buildTypes (only once)
           if "lifeos-release.keystore" not in t:
-              t = t.replace(
-                  "signingConfigs {",
-                  """signingConfigs {
-                  release {
-                      storeFile file('lifeos-release.keystore')
-                      storePassword 'lifeos-release-pass'
-                      keyAlias 'lifeos'
-                      keyPassword 'lifeos-release-pass'
-                  }
-          """, 1)
+              signing_block = (
+                  "    signingConfigs {\n"
+                  "        release {\n"
+                  "            storeFile file('lifeos-release.keystore')\n"
+                  "            storePassword 'lifeos-release-pass'\n"
+                  "            keyAlias 'lifeos'\n"
+                  "            keyPassword 'lifeos-release-pass'\n"
+                  "        }\n"
+                  "    }\n"
+              )
+              # Insert the whole signingConfigs block right before buildTypes
+              t = re.sub(r'(\s*buildTypes\s*\{)', signing_block + r'\1', t, count=1)
+              print("signingConfigs block inserted")
+          else:
+              print("signingConfigs block already present")
+
+          # 2. Wire signingConfig into buildTypes > release (only once)
+          #    Uses DOTALL so it can span multiple lines, and is anchored to
+          #    buildTypes so it never accidentally matches the signingConfigs block.
           if "signingConfig signingConfigs.release" not in t:
-              t = t.replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
+              t = re.sub(
+                  r'(buildTypes\s*\{[^}]*?release\s*\{)',
+                  r'\1\n            signingConfig signingConfigs.release',
+                  t,
+                  count=1,
+                  flags=re.DOTALL,
+              )
+              print("signingConfig applied to buildTypes.release")
+          else:
+              print("signingConfig already wired")
+
+          # 3. Replace any leftover debug signing reference
           t = t.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+
           p.write_text(t)
-          print("Signing config applied")
+          print("Done — build.gradle updated")
           PY
 
       - name: Build release APK
