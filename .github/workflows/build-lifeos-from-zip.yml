@@ -36,20 +36,38 @@ jobs:
           mkdir lifeos-src
           unzip -q lifeos-source.zip -d lifeos-src/
 
+          # Auto-detect the project root — the deepest folder that owns package.json
+          # This works regardless of what the zip's top-level folder is named.
+          APP_DIR=$(find lifeos-src -maxdepth 3 -name "package.json" \
+            ! -path "*/node_modules/*" \
+            | head -1 \
+            | xargs dirname)
+
+          if [ -z "$APP_DIR" ]; then
+            echo "::error::Could not locate package.json inside the zip. Check the archive structure."
+            exit 1
+          fi
+
+          echo "Detected project root: $APP_DIR"
+
+          # Normalize to a stable path so every subsequent step can use it
+          mv "$APP_DIR" lifeos-src/lifeos-app
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/lifeos-src/lifeos-app" >> $GITHUB_ENV
+
       - name: Install npm dependencies
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: npm install
 
       - name: TypeScript check
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: npx tsc --noEmit
 
       - name: Expo prebuild (Android)
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: npx expo prebuild --platform android --clean --no-install
 
       - name: Bundle SmolLM2-135M brain (best-effort)
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: |
           mkdir -p android/app/src/main/assets/models
           echo "Downloading SmolLM2-135M-Instruct Q4_K_M (~105 MB)..."
@@ -61,7 +79,7 @@ jobs:
                  rm -f android/app/src/main/assets/models/assistant.gguf; }
 
       - name: Disable aapt2 compression for .gguf
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -76,7 +94,7 @@ jobs:
           PY
 
       - name: Create release signing keystore
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: |
           keytool -genkeypair -v \
             -storetype PKCS12 \
@@ -90,7 +108,7 @@ jobs:
             -dname "CN=LifeOS, OU=Personal, O=LifeOS, L=Lagos, ST=Lagos, C=NG"
 
       - name: Configure Gradle release signing
-        working-directory: lifeos-src/lifeos-v2
+        working-directory: lifeos-src/lifeos-app
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -115,13 +133,13 @@ jobs:
           PY
 
       - name: Build release APK
-        working-directory: lifeos-src/lifeos-v2/android
+        working-directory: lifeos-src/lifeos-app/android
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload LifeOS APK
         uses: actions/upload-artifact@v4
         with:
           name: LifeOS-release-apk
-          path: lifeos-src/lifeos-v2/android/app/build/outputs/apk/release/app-release.apk
+          path: lifeos-src/lifeos-app/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
