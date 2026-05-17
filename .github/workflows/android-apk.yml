@@ -37,6 +37,7 @@ jobs:
       - name: Bundle offline speech models
         run: |
           mkdir -p assets/models
+
           curl -L --retry 5 -o /tmp/stt.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2
           tar -xjf /tmp/stt.tar.bz2 -C assets/models
 
@@ -69,10 +70,9 @@ jobs:
             -keypass lifeos-release-pass \
             -dname "CN=LifeOS, OU=Personal, O=LifeOS, L=Lagos, ST=Lagos, C=NG"
 
-      - name: Inject signing properties (safe method)
+      - name: Inject signing properties
         run: |
-          cat >> android/gradle.properties <<EOF
-
+          cat >> android/gradle.properties <<'EOF'
 MYAPP_UPLOAD_STORE_FILE=lifeos-release.keystore
 MYAPP_UPLOAD_KEY_ALIAS=lifeos
 MYAPP_UPLOAD_STORE_PASSWORD=lifeos-release-pass
