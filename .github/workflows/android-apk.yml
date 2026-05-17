@@ -39,8 +39,10 @@ jobs:
           mkdir -p assets/models
           curl -L --retry 5 -o /tmp/stt.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2
           tar -xjf /tmp/stt.tar.bz2 -C assets/models
+
           curl -L --retry 5 -o /tmp/tts.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2
           tar -xjf /tmp/tts.tar.bz2 -C assets/models
+
           rm -f /tmp/stt.tar.bz2 /tmp/tts.tar.bz2
 
       - name: Typecheck
@@ -54,7 +56,7 @@ jobs:
           mkdir -p android/app/src/main/assets/models
           cp -R assets/models/* android/app/src/main/assets/models/
 
-      - name: Create release signing key
+      - name: Create release keystore
         run: |
           keytool -genkeypair -v \
             -storetype PKCS12 \
@@ -67,30 +69,15 @@ jobs:
             -keypass lifeos-release-pass \
             -dname "CN=LifeOS, OU=Personal, O=LifeOS, L=Lagos, ST=Lagos, C=NG"
 
-      - name: Configure release signing
+      - name: Inject signing properties (safe method)
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("android/app/build.gradle")
-          text = path.read_text()
-          if "lifeos-release.keystore" not in text:
-              text = text.replace(
-                  "signingConfigs {",
-                  """signingConfigs {
-                  release {
-                      storeFile file('lifeos-release.keystore')
-                      storePassword 'lifeos-release-pass'
-                      keyAlias 'lifeos'
-                      keyPassword 'lifeos-release-pass'
-                  }
-          """,
-                  1,
-              )
-          if "signingConfig signingConfigs.release" not in text:
-              text = text.replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
-          text = text.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
-          path.write_text(text)
-          PY
+          cat >> android/gradle.properties <<EOF
+
+MYAPP_UPLOAD_STORE_FILE=lifeos-release.keystore
+MYAPP_UPLOAD_KEY_ALIAS=lifeos
+MYAPP_UPLOAD_STORE_PASSWORD=lifeos-release-pass
+MYAPP_UPLOAD_KEY_PASSWORD=lifeos-release-pass
+EOF
 
       - name: Build release APK
         working-directory: android
