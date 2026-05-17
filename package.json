@@ -1,0 +1,52 @@
+{
+  "name": "lifeos",
+  "version": "1.0.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "engines": {
+    "node": ">=20.19.4"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
+    "lint": "expo lint",
+    "prebuild": "expo prebuild",
+    "build:android:apk": "npx eas-cli build --platform android --profile apk",
+    "build:android:production": "npx eas-cli build --platform android --profile production"
+  },
+  "dependencies": {
+    "@dr.pogodin/react-native-fs": "^2.38.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~55.0.0",
+    "expo-camera": "~55.0.18",
+    "expo-contacts": "~55.0.6",
+    "expo-document-picker": "^55.0.0",
+    "expo-file-system": "^55.0.0",
+    "expo-intent-launcher": "~55.0.12",
+    "expo-linking": "^55.0.0",
+    "expo-location": "~55.1.10",
+    "expo-notifications": "^55.0.0",
+    "expo-router": "~55.0.5",
+    "expo-sharing": "^55.0.0",
+    "expo-sqlite": "~55.0.15",
+    "expo-status-bar": "^55.0.0",
+    "react": "19.2.0",
+    "react-native": "0.83.0",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-sherpa-onnx": "^0.4.3",
+    "react-native-screens": "~4.23.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.0",
+    "typescript": "~5.9.2"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "enabled": true,
+        "listUnknownPackages": true
+      }
+    }
+  }
+}

@@ -1,0 +1,104 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-apk:
+    name: Build signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.4"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Bundle offline speech models
+        run: |
+          mkdir -p assets/models
+          curl -L --retry 5 -o /tmp/stt.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.en.tar.bz2
+          tar -xjf /tmp/stt.tar.bz2 -C assets/models
+          curl -L --retry 5 -o /tmp/tts.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2
+          tar -xjf /tmp/tts.tar.bz2 -C assets/models
+          rm -f /tmp/stt.tar.bz2 /tmp/tts.tar.bz2
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Copy speech models into Android assets
+        run: |
+          mkdir -p android/app/src/main/assets/models
+          cp -R assets/models/* android/app/src/main/assets/models/
+
+      - name: Create release signing key
+        run: |
+          keytool -genkeypair -v \
+            -storetype PKCS12 \
+            -keystore android/app/lifeos-release.keystore \
+            -alias lifeos \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass lifeos-release-pass \
+            -keypass lifeos-release-pass \
+            -dname "CN=LifeOS, OU=Personal, O=LifeOS, L=Lagos, ST=Lagos, C=NG"
+
+      - name: Configure release signing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+          if "lifeos-release.keystore" not in text:
+              text = text.replace(
+                  "signingConfigs {",
+                  """signingConfigs {
+                  release {
+                      storeFile file('lifeos-release.keystore')
+                      storePassword 'lifeos-release-pass'
+                      keyAlias 'lifeos'
+                      keyPassword 'lifeos-release-pass'
+                  }
+          """,
+                  1,
+              )
+          if "signingConfig signingConfigs.release" not in text:
+              text = text.replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
+          text = text.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+          path.write_text(text)
+          PY
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LifeOS-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error

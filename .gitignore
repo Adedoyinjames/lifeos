@@ -1,0 +1,27 @@
+node_modules/
+.expo/
+.expo-shared/
+.gradle/
+android/
+ios/
+dist/
+build/
+__pycache__/
+*.pyc
+*.jks
+*.keystore
+*.apk
+*.aab
+*.zip
+*.tgz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+
+# Unrelated local projects/scripts that should not be pushed with LifeOS
+Truth/
+truth-android/
+.github/workflows/truth-android-apk.yml
+app.py
+main.py
